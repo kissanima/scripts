@@ -1,0 +1,10 @@
+# Core dependencies
+psutil>=5.8.0
+
+# Optional dependencies for building
+pyinstaller>=4.0
+
+# Development dependencies (optional)
+# pylint>=2.0.0
+# black>=21.0.0
+# flake8>=3.8.0
