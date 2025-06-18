@@ -485,6 +485,8 @@ class HealthTab(BaseTab):
             if is_running:
                 server_status = self.main_window.process_manager.get_server_status()
                 
+                
+                
                 # Update server status
                 if self.server_status_label:
                     self.server_status_label.configure(

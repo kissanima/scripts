@@ -409,29 +409,100 @@ Playit.gg is a free tunneling service that allows your Minecraft server to be ac
             messagebox.showerror("Error", f"Failed to start server: {e}")
     
     def auto_start_playit(self):
-        """Auto-start Playit.gg after server starts"""
+        """Auto-start Playit.gg after server starts with better error handling"""
         try:
-            if self.main_window.process_manager.is_server_running():
+            # Double-check server is still running
+            if not self.main_window.process_manager.is_server_running():
+                logging.warning("Server not running, skipping Playit.gg auto-start")
+                return
+            
+            # Check if Playit.gg is already running
+            if self.main_window.process_manager.is_playit_running():
+                logging.info("Playit.gg already running, skipping auto-start")
+                return
+            
+            # Validate Playit.gg path again
+            if not self.main_window.playit_path or not os.path.exists(self.main_window.playit_path):
+                logging.error("Playit.gg path invalid, cannot auto-start")
+                self.main_window.footer.update_status("Auto-start failed: Playit.gg path not found")
+                return
+            
+            # Attempt to start Playit.gg
+            success = self.main_window.start_playit()
+            
+            if success:
+                self.main_window.footer.update_status("Server and Playit.gg started successfully")
+                logging.info("Playit.gg auto-started successfully")
+                
+                # Add console message
+                console_tab = self.main_window.tabs.get('console')
+                if console_tab and hasattr(console_tab, 'add_console_message'):
+                    console_tab.add_console_message("🌍 Playit.gg auto-started with server", "info")
+            else:
+                # Auto-start failed, offer retry
+                self.main_window.footer.update_status("Playit.gg auto-start failed - check console for details")
+                logging.error("Playit.gg auto-start failed")
+                
+                # Optional: Retry once after 5 seconds
+                self.main_window.root.after(5000, self._retry_auto_start)
+                
+        except Exception as e:
+            logging.error(f"Error in auto_start_playit: {e}")
+            self.main_window.footer.update_status("Playit.gg auto-start error")
+
+    def _retry_auto_start(self):
+        """Retry auto-start once if it failed"""
+        try:
+            if (self.main_window.process_manager.is_server_running() and 
+                not self.main_window.process_manager.is_playit_running()):
+                
+                logging.info("Retrying Playit.gg auto-start...")
                 success = self.main_window.start_playit()
+                
                 if success:
-                    self.main_window.footer.update_status("Server and Playit.gg started successfully")
-                    # Add message to console
+                    self.main_window.footer.update_status("Playit.gg started successfully (retry)")
                     console_tab = self.main_window.tabs.get('console')
                     if console_tab and hasattr(console_tab, 'add_console_message'):
-                        console_tab.add_console_message("🌍 Playit.gg auto-started with server", "info")
+                        console_tab.add_console_message("🌍 Playit.gg started (retry)", "info")
+                else:
+                    logging.error("Playit.gg auto-start retry also failed")
+                    
         except Exception as e:
-            logging.error(f"Error auto-starting Playit.gg: {e}")
-    
-    # ... [Include all other existing methods] ...
+            logging.error(f"Error in retry auto-start: {e}")
+
     
     def browse_server_jar(self):
         """Browse for server JAR file"""
         try:
             logging.info("Server control tab: Browse server JAR clicked")
+            # Call main window method which handles saving
             self.main_window.browse_server_jar()
+            
+            # Additional validation and UI update
+            if hasattr(self.main_window, 'server_jar_path') and self.main_window.server_jar_path:
+                self.server_jar_var.set(self.main_window.server_jar_path)
+                logging.info("Server control tab JAR path updated")
+                
         except Exception as e:
             logging.error(f"Error browsing server JAR: {e}")
             messagebox.showerror("Error", f"Failed to browse for server JAR: {e}")
+
+    def browse_playit(self):
+        """Browse for Playit.gg executable"""
+        try:
+            logging.info("Server control tab: Browse Playit.gg clicked")
+            # Call main window method which handles saving
+            self.main_window.browse_playit()
+            
+            # Additional validation and UI update
+            if hasattr(self.main_window, 'playit_path') and self.main_window.playit_path:
+                self.playit_var.set(self.main_window.playit_path)
+                logging.info("Server control tab Playit.gg path updated")
+                
+        except Exception as e:
+            logging.error(f"Error browsing Playit.gg: {e}")
+            messagebox.showerror("Error", f"Failed to browse for Playit.gg: {e}")
+
     
     def browse_playit(self):
         """Browse for Playit.gg executable"""

@@ -28,6 +28,11 @@ class ProcessManager:
         self.monitoring_active = False
         self.monitor_thread = None
         
+        self._cached_server_pid = None
+        self._last_pid_scan = 0
+        self._pid_cache_duration = 10  # Cache PID for 10 seconds
+
+        
         # Server status
         self.server_status = {
             'status': 'stopped',
@@ -330,26 +335,45 @@ class ProcessManager:
         return self.playit_process is not None and self.playit_process.poll() is None
     
     def get_server_status(self) -> Dict[str, Any]:
-        """Get detailed server status"""
+        """Get server status with reduced CPU monitoring frequency"""
         if not self.is_server_running():
             return {"status": "stopped", "pid": None, "memory": None, "cpu": None}
         
         try:
             import psutil
-            process = psutil.Process(self.server_process.pid)
-            return {
-                "status": self.server_status['status'],
-                "pid": self.server_process.pid,
-                "memory": process.memory_info().rss / 1024 / 1024,
-                "cpu": process.cpu_percent(),
-                "uptime": time.time() - process.create_time()
-            }
+            
+            real_server_pid = self.find_real_server_process()
+            
+            if real_server_pid:
+                process = psutil.Process(real_server_pid)
+                memory_mb = process.memory_info().rss / 1024 / 1024
+                
+                # REDUCED CPU monitoring frequency - every 5 seconds instead of 1
+                if not hasattr(self, '_last_cpu_time') or time.time() - self._last_cpu_time > 5.0:
+                    raw_cpu_percent = process.cpu_percent(interval=None)  # Non-blocking
+                    self._last_cpu_time = time.time()
+                    
+                    # Normalize CPU
+                    cpu_cores = psutil.cpu_count()
+                    normalized_cpu = min(raw_cpu_percent / cpu_cores, 100.0)
+                    self._cached_cpu = normalized_cpu
+                else:
+                    normalized_cpu = getattr(self, '_cached_cpu', 0.0)
+                
+                return {
+                    "status": self.server_status['status'],
+                    "pid": real_server_pid,
+                    "memory": memory_mb,
+                    "cpu": normalized_cpu,
+                    "uptime": time.time() - process.create_time()
+                }
+                
         except Exception as e:
             logging.error(f"Failed to get server status: {e}")
-            return {
-                "status": self.server_status['status'], 
-                "pid": self.server_process.pid if self.server_process else None
-            }
+            return {"status": "error", "pid": None, "memory": 0, "cpu": 0}
+
+
+
     
     def stop_all_processes(self) -> bool:
         """Stop all managed processes"""
@@ -362,3 +386,76 @@ class ProcessManager:
             success &= self.stop_playit()
         
         return success
+    
+            
+    def find_real_server_process(self):
+        """Find server process with caching to reduce CPU usage"""
+        import time
+        
+        # Use cached PID if recent
+        if (self._cached_server_pid and 
+            time.time() - self._last_pid_scan < self._pid_cache_duration):
+            try:
+                # Verify cached PID still exists
+                import psutil
+                process = psutil.Process(self._cached_server_pid)
+                if process.is_running():
+                    return self._cached_server_pid
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+        
+        # Scan for new PID
+        try:
+            import psutil
+            
+            best_candidate = None
+            highest_memory = 0
+            
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'memory_info']):
+                try:
+                    if 'java' in proc.info['name'].lower():
+                        cmdline_str = ' '.join(proc.info['cmdline']).lower()
+                        memory_mb = proc.info['memory_info'].rss / 1024 / 1024
+                        
+                        server_indicators = ['server.jar', 'nogui', 'fabric-server', 'forge-server']
+                        is_server = any(indicator in cmdline_str for indicator in server_indicators)
+                        
+                        if is_server and memory_mb > highest_memory:
+                            highest_memory = memory_mb
+                            best_candidate = proc.info['pid']
+                            
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            
+            # Cache the result
+            self._cached_server_pid = best_candidate
+            self._last_pid_scan = time.time()
+            
+            return best_candidate
+            
+        except Exception as e:
+            logging.error(f"Error finding real server process: {e}")
+            return None
+
+    def update_server_tracking(self):
+        """Update tracking to monitor the correct server process"""
+        try:
+            real_server_pid = self.find_real_server_process()
+            
+            if real_server_pid and real_server_pid != (self.server_process.pid if self.server_process else None):
+                logging.info(f"Switching server tracking from PID {self.server_process.pid if self.server_process else 'None'} to PID {real_server_pid}")
+                
+                # Create a mock process object with the correct PID
+                import subprocess
+                
+                # Update our tracking
+                if self.server_process:
+                    old_pid = self.server_process.pid
+                    # We can't change the PID of existing process, so we'll handle this in get_server_status
+                    self.real_server_pid = real_server_pid
+                    logging.info(f"Now monitoring real server PID {real_server_pid} instead of launcher PID {old_pid}")
+                
+        except Exception as e:
+            logging.error(f"Error updating server tracking: {e}")
+
+

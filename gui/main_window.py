@@ -1,5 +1,5 @@
 """
-Main window for the Minecraft Server Manager GUI - With Working Console Capture
+Main window for the Minecraft Server Manager GUI - With Working Console Capture and MOD MANAGEMENT
 """
 
 import tkinter as tk
@@ -22,6 +22,27 @@ from health_monitor import ServerHealthMonitor
 from backup_manager import BackupManager
 from server_properties_manager import ServerPropertiesManager
 
+# Import MOD MANAGEMENT components
+try:
+    from mod_manager import ModManager
+    from mod_backup_manager import ModBackupManager
+    from mod_dependency_resolver import ModDependencyResolver
+    from mod_update_checker import ModUpdateChecker
+    from mod_config_manager import ModConfigManager
+    from mod_downloader import ModDownloader
+    MOD_MANAGEMENT_AVAILABLE = True
+    logging.info("✅ Mod management modules imported successfully")
+except ImportError as e:
+    MOD_MANAGEMENT_AVAILABLE = False
+    logging.warning(f"⚠️ Mod management not available: {e}")
+    # Create dummy classes to prevent errors
+    ModManager = None
+    ModBackupManager = None
+    ModDependencyResolver = None
+    ModUpdateChecker = None
+    ModConfigManager = None
+    ModDownloader = None
+
 # Import GUI components
 from .utils.theme_manager import ThemeManager
 from .components.header import ModernHeader
@@ -34,14 +55,23 @@ from .tabs.health_tab import HealthTab
 from .tabs.settings_tab import SettingsTab
 from .tabs.server_properties_tab import ServerPropertiesTab
 
+# Import MOD MANAGEMENT GUI components
+try:
+    from .tabs.mods_tab import ModsTab
+    MODS_TAB_AVAILABLE = True
+    logging.info("✅ Mods tab imported successfully")
+except ImportError as e:
+    MODS_TAB_AVAILABLE = False
+    ModsTab = None
+    logging.warning(f"⚠️ Mods tab not available: {e}")
 
 class MinecraftServerGUI:
-    """Main GUI application for Minecraft Server Manager with Working Console Capture"""
+    """Main GUI application for Minecraft Server Manager with Working Console Capture and MOD MANAGEMENT"""
     
     def __init__(self):
         self.root = tk.Tk()
         self.root.title(f"{APP_NAME} v{VERSION}")
-        
+        self.mod_management_enabled = False  # Default to False
         # Set professional window size and make it responsive
         self.setup_window_properties()
         
@@ -49,6 +79,9 @@ class MinecraftServerGUI:
         self.error_handler = ErrorHandler()
         self.config = Config()
         self.server_properties_manager = ServerPropertiesManager(self.error_handler)
+        
+        # Initialize MOD MANAGEMENT components
+        self.initialize_mod_management()
         
         # Initialize managers
         self.process_manager = ProcessManager(self.config)
@@ -62,6 +95,7 @@ class MinecraftServerGUI:
         self.backup_manager = BackupManager(self.process_manager, self.config)
         self.auto_shutdown_manager = AutoShutdownManager(self)
         self.sleep_manager = SleepManager(self)
+        
         
         # Initialize theme manager
         self.theme_manager = ThemeManager(self.config)
@@ -85,19 +119,160 @@ class MinecraftServerGUI:
         self.create_professional_gui()
         self.setup_callbacks()
         
-        # Load saved paths and start managers
-        self.load_saved_paths()
+        # FIXED: Load saved paths with delay to ensure UI is ready
+        self.root.after(500, self.load_saved_paths)  # 500ms delay
         self.start_managers()
         
-         # Check for first-time setup AFTER everything is loaded
+        # Check for first-time setup AFTER everything is loaded
         self.root.after(2000, self.check_first_time_setup)  # 2 second delay
         
         # Setup window protocol
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
-        logging.info("Enhanced Minecraft Server Manager initialized")
+        logging.info("Enhanced Minecraft Server Manager with Mod Management initialized")
+    
+    def initialize_mod_management(self):
+        """Initialize all mod management components"""
+        if not MOD_MANAGEMENT_AVAILABLE:
+            logging.warning("Mod management components not available - skipping initialization")
+            self.mod_management_enabled = False
+            return
         
-        
+        try:
+            logging.info("Initializing mod management system...")
+            
+            # Core mod manager
+            self.modmanager = ModManager(
+                self.config,                            # positional: config
+                self.error_handler,                     # positional: error_handler  
+                self.get_current_server_directory() 
+            )
+            
+            # Backup manager
+            self.modbackupmanager = ModBackupManager(
+                modmanager=self.modmanager,
+                config=self.config
+            )
+            
+            # Dependency resolver
+            self.moddependencyresolver = ModDependencyResolver(
+                modmanager=self.modmanager,
+                config=self.config
+            )
+            
+            # Update checker
+            self.modupdatechecker = ModUpdateChecker(
+                modmanager=self.modmanager,
+                config=self.config
+            )
+            
+            # Config manager
+            self.modconfigmanager = ModConfigManager(
+                modmanager=self.modmanager,
+                config=self.config
+            )
+            
+            # Downloader
+            self.moddownloader = ModDownloader(
+                modmanager=self.modmanager,
+                config=self.config
+            )
+            
+            # Connect backup manager to mod manager
+            self.modmanager.backupmanager = self.modbackupmanager
+            
+            # Register mod management callbacks
+            self.setup_mod_callbacks()
+            
+            self.mod_management_enabled = True
+            logging.info("✅ Mod management system initialized successfully")
+            
+        except Exception as e:
+            logging.error(f"❌ Error initializing mod management: {e}")
+            self.error_handler.handle_error(e, "mod_management_init", ErrorSeverity.MEDIUM)
+            
+            # Set fallback values
+            self.mod_management_enabled = False
+            self.modmanager = None
+            self.modbackupmanager = None
+            self.moddependencyresolver = None
+            self.modupdatechecker = None
+            self.modconfigmanager = None
+            self.moddownloader = None
+            self.mod_management_enabled = False
+    
+    def setup_mod_callbacks(self):
+        """Setup mod management callbacks"""
+        try:
+            if not self.mod_management_enabled:
+                return
+            
+            # Register mod operation callbacks - FIXED method names
+            if hasattr(self.modmanager, 'register_install_callback'):
+                self.modmanager.register_install_callback(self.on_mod_operation)
+            
+            # Register update callbacks
+            if hasattr(self.modupdatechecker, 'register_completion_callback'):
+                self.modupdatechecker.register_completion_callback(self.on_mod_updates_checked)
+            
+            # Register download callbacks
+            if hasattr(self.moddownloader, 'register_download_completed_callback'):
+                self.moddownloader.register_download_completed_callback(self.on_mod_download_completed)
+            
+            logging.info("Mod management callbacks registered")
+            
+        except Exception as e:
+            logging.error(f"Error setting up mod callbacks: {e}")
+
+    
+    def get_current_server_directory(self) -> str:
+        """Get the current server directory for mod management"""
+        try:
+            # Try to get from server JAR path
+            if hasattr(self, 'server_jar_path') and self.server_jar_path:
+                return os.path.dirname(self.server_jar_path)
+            
+            # Try to get from process manager
+            if hasattr(self, 'process_manager') and self.process_manager:
+                if hasattr(self.process_manager, 'serverdir'):
+                    return self.process_manager.serverdir
+            
+            # Try to get from config
+            last_jar = self.config.get("last_server_jar", "")
+            if last_jar and os.path.exists(last_jar):
+                return os.path.dirname(last_jar)
+            
+            # Default to current working directory
+            return os.getcwd()
+            
+        except Exception as e:
+            logging.error(f"Error getting server directory: {e}")
+            return os.getcwd()
+    
+    def update_server_directory_for_mods(self, new_server_dir: str):
+        """Update server directory for mod management components"""
+        try:
+            if not self.mod_management_enabled:
+                return
+            
+            logging.info(f"Updating mod management server directory to: {new_server_dir}")
+            
+            # Update mod manager
+            if self.modmanager:
+                self.modmanager.set_server_directory(new_server_dir)
+            
+            # Update config manager paths
+            if self.modconfigmanager:
+                self.modconfigmanager.setup_directories()
+            
+            # Refresh mods tab if it exists
+            if hasattr(self, 'mods_tab') and self.mods_tab:
+                self.root.after(1000, self.mods_tab.refresh_mods)  # Delay to let directory update complete
+            
+            logging.info("Mod management server directory updated successfully")
+            
+        except Exception as e:
+            logging.error(f"Error updating server directory for mods: {e}")
     
     def setup_window_properties(self):
         """Setup professional window properties"""
@@ -166,7 +341,7 @@ class MinecraftServerGUI:
         self.footer.footer_frame.grid(row=2, column=0, sticky="ew", pady=(theme['margin_medium'], 0))
     
     def create_tabs(self):
-        """Create all tabs with professional styling"""
+        """Create all tabs with professional styling including MODS TAB"""
         try:
             # Dashboard tab
             self.tabs['dashboard'] = DashboardTab(self.notebook, self.theme_manager, self)
@@ -179,6 +354,57 @@ class MinecraftServerGUI:
             # Console tab
             self.tabs['console'] = ConsoleTab(self.notebook, self.theme_manager, self)
             self.tabs['console'].add_to_notebook(self.notebook, "💻 Console")
+            
+            # MOD MANAGEMENT TAB - Add after console
+            if self.mod_management_enabled and MODS_TAB_AVAILABLE:
+                try:
+                    logging.info("Creating ModsTab...")
+                    
+                    # Create mods tab with detailed debugging
+                    self.mods_tab = ModsTab(
+                        self.notebook,      # parent
+                        self.theme_manager, # theme_manager  
+                        self               # main_window (self)
+                    )
+                    
+                    logging.info("ModsTab created successfully, getting frame...")
+                    
+                    # Get frame safely
+                    try:
+                        mods_frame = self.mods_tab.get_frame()
+                        logging.info(f"Got mods frame: {type(mods_frame)}")
+                        
+                        if mods_frame:
+                            # Add to notebook
+                            self.notebook.add(mods_frame, text="🔧 Mods")
+                            self.tabs['mods'] = self.mods_tab
+                            logging.info("✅ Mods tab added successfully")
+                        else:
+                            logging.error("❌ Mods frame is None")
+                            
+                    except Exception as frame_error:
+                        logging.error(f"❌ Error getting mods frame: {frame_error}")
+                        import traceback
+                        traceback.print_exc()
+                    
+                except Exception as mod_tab_error:
+                    logging.error(f"❌ Failed to create mods tab: {mod_tab_error}")
+                    import traceback
+                    traceback.print_exc()
+                    
+                    # Safe footer update
+                    if hasattr(self, 'footer') and self.footer:
+                        try:
+                            self.footer.update_status("Mods tab unavailable - check logs for details")
+                        except:
+                            logging.warning("Could not update footer status")
+            else:
+                logging.warning(f"⚠️ Mods tab not available (enabled: {self.mod_management_enabled}, available: {MODS_TAB_AVAILABLE})")
+                if hasattr(self, 'footer') and self.footer:
+                    try:
+                        self.footer.update_status("Mods tab disabled - mod management not available")
+                    except:
+                        logging.warning("Could not update footer status")
             
             # Backup tab
             self.tabs['backup'] = BackupTab(self.notebook, self.theme_manager, self)
@@ -204,6 +430,74 @@ class MinecraftServerGUI:
         except Exception as e:
             error_info = self.error_handler.handle_error(e, "create_tabs", ErrorSeverity.MEDIUM)
             messagebox.showerror("Tab Creation Error", f"Failed to create tabs: {error_info['message']}")
+    
+    # MOD MANAGEMENT CALLBACK METHODS
+    def on_mod_operation(self, operation: str, modinfo, message: str):
+        """Handle mod operation notifications"""
+        try:
+            logging.info(f"Mod operation: {operation} - {modinfo.name if modinfo else 'Unknown'}")
+            
+            if hasattr(self, 'footer') and self.footer:
+                if operation == "installed":
+                    self.footer.update_status(f"✅ Mod installed: {modinfo.name}")
+                elif operation == "removed":
+                    self.footer.update_status(f"🗑️ Mod removed: {modinfo.name}")
+                elif operation == "enabled":
+                    self.footer.update_status(f"✅ Mod enabled: {modinfo.name}")
+                elif operation == "disabled":
+                    self.footer.update_status(f"⏸️ Mod disabled: {modinfo.name}")
+                else:
+                    self.footer.update_status(f"🔧 Mod {operation}: {modinfo.name if modinfo else 'Unknown'}")
+            
+            # Refresh mods tab if it exists
+            if hasattr(self, 'mods_tab') and self.mods_tab:
+                if hasattr(self.mods_tab, 'refresh_mods'):
+                    self.root.after(1000, self.mods_tab.refresh_mods)
+                else:
+                    print("Mods tab doesn't have refresh_mods method")
+
+                
+        except Exception as e:
+            logging.error(f"Error handling mod operation callback: {e}")
+    
+    def on_mod_updates_checked(self, updates_info):
+        """Handle mod update check completion"""
+        try:
+            update_count = len([u for u in updates_info.values() if u.update_status.value == "update_available"])
+            
+            if update_count > 0:
+                if hasattr(self, 'footer') and self.footer:
+                    self.footer.update_status(f"📦 {update_count} mod update(s) available")
+                
+                # Show notification if enabled
+                if self.config.get_mod_setting("notification_on_updates", True):
+                    messagebox.showinfo(
+                        "Mod Updates Available",
+                        f"{update_count} mod update(s) are available!\n\nCheck the Mods tab for details."
+                    )
+            else:
+                if hasattr(self, 'footer') and self.footer:
+                    self.footer.update_status("✅ All mods are up to date")
+                    
+        except Exception as e:
+            logging.error(f"Error handling mod updates callback: {e}")
+    
+    def on_mod_download_completed(self, download_task):
+        """Handle mod download completion"""
+        try:
+            if download_task.status.value == "completed":
+                if hasattr(self, 'footer') and self.footer:
+                    self.footer.update_status(f"📥 Downloaded: {download_task.mod_name}")
+                
+                # Auto-install if enabled
+                if self.config.get_mod_setting("auto_install_after_download", True):
+                    self.footer.update_status(f"🔧 Auto-installing: {download_task.mod_name}")
+            else:
+                if hasattr(self, 'footer') and self.footer:
+                    self.footer.update_status(f"❌ Download failed: {download_task.mod_name}")
+                    
+        except Exception as e:
+            logging.error(f"Error handling mod download callback: {e}")
     
     def read_server_logs(self):
         """Read server logs in real-time - WORKING VERSION from old code"""
@@ -358,13 +652,21 @@ class MinecraftServerGUI:
             if self.footer and hasattr(self.footer, 'update_theme'):
                 self.footer.update_theme()
             
-            # Update all tabs safely
+            # Update all tabs safely (including mods tab)
             for tab_name, tab in self.tabs.items():
                 try:
                     if hasattr(tab, 'update_theme'):
                         tab.update_theme()
                 except Exception as tab_error:
                     logging.warning(f"Failed to update theme for tab {tab_name}: {tab_error}")
+            
+            # Update mods tab specifically
+            if hasattr(self, 'mods_tab') and self.mods_tab:
+                try:
+                    if hasattr(self.mods_tab, 'update_theme'):
+                        self.mods_tab.update_theme()
+                except Exception as mods_theme_error:
+                    logging.warning(f"Failed to update theme for mods tab: {mods_theme_error}")
             
             if self.footer:
                 self.footer.update_status(f"Theme changed to {new_theme}")
@@ -385,6 +687,14 @@ class MinecraftServerGUI:
             if success:
                 self.footer.update_status("Server started successfully")
                 self.header.update_server_status("Starting", self.theme_manager.get_current_theme()['warning'])
+                
+                # Notify dashboard
+                self.notify_dashboard_change()
+                
+                # Update mod management with server directory
+                if self.mod_management_enabled:
+                    server_dir = os.path.dirname(self.server_jar_path)
+                    self.update_server_directory_for_mods(server_dir)
                 
                 # Switch to console tab to show output
                 if 'console' in self.tabs:
@@ -413,6 +723,9 @@ class MinecraftServerGUI:
             if success:
                 self.footer.update_status("Server stopped successfully")
                 self.header.update_server_status("Stopped", self.theme_manager.get_current_theme()['text_muted'])
+                
+                # Notify dashboard
+                self.notify_dashboard_change()
                 
                 # Add stop message to console
                 console_tab = self.tabs.get('console')
@@ -483,183 +796,145 @@ class MinecraftServerGUI:
             messagebox.showerror("Playit Error", f"Failed to stop Playit.gg: {error_info['message']}")
     
     def browse_server_jar(self):
-        """Browse for server JAR file and save the path"""
+        """Browse for server JAR file with immediate saving"""
         try:
-            logging.info("Opening server JAR file dialog...")
-            
-            # Get initial directory - try last used directory first
-            initial_dir = os.getcwd()
-            last_jar = self.config.get("last_server_jar", "")
-            if last_jar and os.path.exists(os.path.dirname(last_jar)):
-                initial_dir = os.path.dirname(last_jar)
-            
             filename = filedialog.askopenfilename(
                 title="Select Minecraft Server JAR",
-                filetypes=[
-                    ("JAR files", "*.jar"),
-                    ("All files", "*.*")
-                ],
-                initialdir=initial_dir
+                filetypes=[("JAR files", "*.jar"), ("All files", "*.*")],
+                initialdir=os.getcwd()
             )
             
             if filename:
-                logging.info(f"User selected file: {filename}")
-                
-                # Validate the file exists
-                if not os.path.exists(filename):
-                    messagebox.showerror("Error", f"Selected file does not exist: {filename}")
-                    return
-                
-                # Validate it's a JAR file
-                if not filename.lower().endswith('.jar'):
-                    if not messagebox.askyesno("Warning", 
-                        f"Selected file doesn't have .jar extension: {os.path.basename(filename)}\n\nContinue anyway?"):
-                        return
-                
-                # Set the path
+                # Update main window
                 self.server_jar_path = filename
-                logging.info(f"Server JAR path set to: {self.server_jar_path}")
                 
-                # Save to config immediately
-                try:
-                    self.config.set("last_server_jar", filename)
-                    save_success = self.config.save_config()
-                    if save_success:
-                        logging.info("Server JAR path saved to config")
-                    else:
-                        logging.warning("Failed to save server JAR path to config")
-                except Exception as save_error:
-                    logging.error(f"Error saving config: {save_error}")
+                # Save to config IMMEDIATELY
+                self.config.set("last_server_jar", filename)
+                self.config.save_config()
                 
-                # Update server control tab UI
-                try:
-                    if 'server_control' in self.tabs:
-                        server_control_tab = self.tabs['server_control']
-                        if hasattr(server_control_tab, 'server_jar_var'):
-                            server_control_tab.server_jar_var.set(filename)
-                            logging.info("Updated server control tab display")
-                        else:
-                            logging.warning("Server control tab doesn't have server_jar_var")
-                    else:
-                        logging.warning("Server control tab not found")
-                except Exception as ui_error:
-                    logging.error(f"Error updating UI: {ui_error}")
+                # Update ALL UI components
+                self.update_all_jar_references(filename)
+                
+                # Update mod management server directory
+                if self.mod_management_enabled:
+                    server_dir = os.path.dirname(filename)
+                    self.update_server_directory_for_mods(server_dir)
                 
                 # Update footer
-                try:
-                    if hasattr(self, 'footer') and self.footer:
-                        self.footer.update_status(f"Selected: {os.path.basename(filename)}")
-                    else:
-                        logging.warning("Footer not available")
-                except Exception as footer_error:
-                    logging.error(f"Error updating footer: {footer_error}")
+                jar_name = os.path.basename(filename)
+                self.footer.update_status(f"Server JAR selected: {jar_name}")
                 
-                logging.info("Server JAR selection completed successfully")
-            else:
-                logging.info("User cancelled file selection")
+                logging.info(f"Server JAR path saved: {filename}")
+                
+                # Auto-load server properties
+                self.auto_load_server_properties()
+                
+                # Notify dashboard of JAR change
+                self.notify_dashboard_change()
                 
         except Exception as e:
-            error_msg = f"Failed to select server JAR file: {str(e)}"
-            logging.error(error_msg)
-            logging.error(f"Exception details: {type(e).__name__}: {e}")
-            
-            # Show error to user
-            messagebox.showerror("File Selection Error", error_msg)
-            
-            # Update status
-            if hasattr(self, 'footer') and self.footer:
-                self.footer.update_status("Failed to select server JAR")
+            logging.error(f"Error browsing server JAR: {e}")
+            messagebox.showerror("Error", f"Failed to select server JAR: {e}")
 
     def browse_playit(self):
-        """Browse for Playit.gg executable and save the path"""
+        """Browse for Playit.gg executable with immediate saving"""
         try:
-            logging.info("Opening Playit.gg file dialog...")
-            
-            # Get initial directory
-            initial_dir = os.getcwd()
-            last_playit = self.config.get("last_playit_path", "")
-            if last_playit and os.path.exists(os.path.dirname(last_playit)):
-                initial_dir = os.path.dirname(last_playit)
-            
-            # Different file types based on OS
-            if os.name == 'nt':  # Windows
-                filetypes = [
-                    ("Executable files", "*.exe"),
-                    ("All files", "*.*")
-                ]
-            else:  # Unix/Linux/macOS
-                filetypes = [
-                    ("All files", "*.*"),
-                    ("Executable files", "*")
-                ]
+            filetypes = [("Executable files", "*.exe"), ("All files", "*.*")] if os.name == 'nt' else [("All files", "*.*")]
             
             filename = filedialog.askopenfilename(
                 title="Select Playit.gg Executable",
                 filetypes=filetypes,
-                initialdir=initial_dir
+                initialdir=os.getcwd()
             )
             
             if filename:
-                logging.info(f"User selected Playit.gg file: {filename}")
-                
-                # Validate the file exists
-                if not os.path.exists(filename):
-                    messagebox.showerror("Error", f"Selected file does not exist: {filename}")
-                    return
-                
-                # Set the path
+                # Update main window
                 self.playit_path = filename
-                logging.info(f"Playit.gg path set to: {self.playit_path}")
                 
-                # Save to config immediately
-                try:
-                    self.config.set("last_playit_path", filename)
-                    save_success = self.config.save_config()
-                    if save_success:
-                        logging.info("Playit.gg path saved to config")
-                    else:
-                        logging.warning("Failed to save Playit.gg path to config")
-                except Exception as save_error:
-                    logging.error(f"Error saving config: {save_error}")
+                # Save to config IMMEDIATELY
+                self.config.set("last_playit_path", filename)
+                self.config.save_config()
                 
-                # Update server control tab UI
-                try:
-                    if 'server_control' in self.tabs:
-                        server_control_tab = self.tabs['server_control']
-                        if hasattr(server_control_tab, 'playit_var'):
-                            server_control_tab.playit_var.set(filename)
-                            logging.info("Updated server control tab Playit.gg display")
-                        else:
-                            logging.warning("Server control tab doesn't have playit_var")
-                    else:
-                        logging.warning("Server control tab not found")
-                except Exception as ui_error:
-                    logging.error(f"Error updating Playit.gg UI: {ui_error}")
+                # Update ALL UI components
+                self.update_all_playit_references(filename)
                 
                 # Update footer
-                try:
-                    if hasattr(self, 'footer') and self.footer:
-                        self.footer.update_status(f"Selected: {os.path.basename(filename)}")
-                    else:
-                        logging.warning("Footer not available")
-                except Exception as footer_error:
-                    logging.error(f"Error updating footer: {footer_error}")
+                playit_name = os.path.basename(filename)
+                self.footer.update_status(f"Playit.gg selected: {playit_name}")
                 
-                logging.info("Playit.gg selection completed successfully")
-            else:
-                logging.info("User cancelled Playit.gg file selection")
+                logging.info(f"Playit.gg path saved: {filename}")
                 
         except Exception as e:
-            error_msg = f"Failed to select Playit.gg file: {str(e)}"
-            logging.error(error_msg)
-            logging.error(f"Exception details: {type(e).__name__}: {e}")
+            logging.error(f"Error browsing Playit.gg: {e}")
+            messagebox.showerror("Error", f"Failed to select Playit.gg: {e}")
+
+    def update_all_jar_references(self, jar_path):
+        """FIXED: Update JAR path in ALL UI components with better validation"""
+        try:
+            # Update server control tab with validation
+            if 'server_control' in self.tabs:
+                tab = self.tabs['server_control']
+                
+                # Check if tab is fully initialized
+                if (hasattr(tab, 'server_jar_var') and 
+                    hasattr(tab.server_jar_var, 'set')):
+                    try:
+                        tab.server_jar_var.set(jar_path)
+                        logging.info("Updated server control JAR display")
+                    except tk.TclError as e:
+                        logging.warning(f"UI not ready for JAR update: {e}")
+                        # Retry after a delay
+                        self.root.after(1000, lambda: self.update_all_jar_references(jar_path))
+                        return
+                
+                # Update main window reference
+                if hasattr(tab, 'main_window'):
+                    tab.main_window.server_jar_path = jar_path
             
-            # Show error to user
-            messagebox.showerror("File Selection Error", error_msg)
+            # Update dashboard if needed
+            if 'dashboard' in self.tabs:
+                if hasattr(self.tabs['dashboard'], 'update_server_info'):
+                    self.tabs['dashboard'].update_server_info()
             
-            # Update status
-            if hasattr(self, 'footer') and self.footer:
-                self.footer.update_status("Failed to select Playit.gg")
+            # Update properties tab if needed
+            if 'properties' in self.tabs:
+                if hasattr(self.tabs['properties'], 'update_server_path'):
+                    self.tabs['properties'].update_server_path()
+                    
+            logging.info("All JAR references updated successfully")
+            
+        except Exception as e:
+            logging.error(f"Error updating JAR references: {e}")
+            # Retry once after delay
+            self.root.after(2000, lambda: self.update_all_jar_references(jar_path))
+
+    def update_all_playit_references(self, playit_path):
+        """FIXED: Update Playit.gg path in ALL UI components with better validation"""
+        try:
+            # Update server control tab
+            if 'server_control' in self.tabs:
+                tab = self.tabs['server_control']
+                
+                if (hasattr(tab, 'playit_var') and 
+                    hasattr(tab.playit_var, 'set')):
+                    try:
+                        tab.playit_var.set(playit_path)
+                        logging.info("Updated server control Playit.gg display")
+                    except tk.TclError as e:
+                        logging.warning(f"UI not ready for Playit.gg update: {e}")
+                        # Retry after a delay
+                        self.root.after(1000, lambda: self.update_all_playit_references(playit_path))
+                        return
+                
+                if hasattr(tab, 'main_window'):
+                    tab.main_window.playit_path = playit_path
+            
+            logging.info("All Playit.gg references updated successfully")
+            
+        except Exception as e:
+            logging.error(f"Error updating Playit.gg references: {e}")
+            # Retry once after delay
+            self.root.after(2000, lambda: self.update_all_playit_references(playit_path))
 
     def send_command(self, event=None):
         """Send command to server - WORKING VERSION"""
@@ -714,28 +989,63 @@ class MinecraftServerGUI:
         pass
     
     def load_saved_paths(self):
-        """Load previously saved file paths and update UI"""
+        """FIXED: Load saved file paths and update ALL UI components with better validation"""
+        
+        self.debug_jar_persistence()
         try:
-            # Load server JAR path
+            # Load JAR path
             last_jar = self.config.get("last_server_jar", "")
             if last_jar and os.path.exists(last_jar):
                 self.server_jar_path = last_jar
-                # Update server control tab if it exists
-                if 'server_control' in self.tabs:
-                    self.tabs['server_control'].server_jar_var.set(last_jar)
-                logging.info(f"Loaded saved server JAR: {last_jar}")
+                self.update_all_jar_references(last_jar)
+                
+                # Update mod management server directory
+                if self.mod_management_enabled:
+                    server_dir = os.path.dirname(last_jar)
+                    self.update_server_directory_for_mods(server_dir)
+                
+                logging.info(f"Loaded and applied server JAR path: {last_jar}")
+                
+                # Auto-load properties on startup too
+                self.root.after(2000, self.auto_load_server_properties)  # 2 second delay for startup
+                
+            elif last_jar:
+                # Path exists in config but file is missing
+                logging.warning(f"Saved JAR path no longer exists: {last_jar}")
+                self.config.set("last_server_jar", "")  # Clear invalid path
+                self.config.save_config()
             
             # Load Playit.gg path
             last_playit = self.config.get("last_playit_path", "")
             if last_playit and os.path.exists(last_playit):
                 self.playit_path = last_playit
-                # Update server control tab if it exists
-                if 'server_control' in self.tabs:
-                    self.tabs['server_control'].playit_var.set(last_playit)
-                logging.info(f"Loaded saved Playit.gg: {last_playit}")
-                
+                self.update_all_playit_references(last_playit)
+                logging.info(f"Loaded and applied Playit.gg path: {last_playit}")
+            elif last_playit:
+                # Path exists in config but file is missing
+                logging.warning(f"Saved Playit.gg path no longer exists: {last_playit}")
+                self.config.set("last_playit_path", "")  # Clear invalid path
+                self.config.save_config()
+            
+            # Force UI update after loading
+            self.root.after(100, self.force_ui_update)
+            
         except Exception as e:
-            self.error_handler.handle_error(e, "load_saved_paths", ErrorSeverity.LOW)
+            logging.error(f"Error loading saved paths: {e}")
+    
+    def force_ui_update(self):
+        """Force update all UI components with current paths"""
+        try:
+            if hasattr(self, 'server_jar_path') and self.server_jar_path:
+                self.update_all_jar_references(self.server_jar_path)
+            
+            if hasattr(self, 'playit_path') and self.playit_path:
+                self.update_all_playit_references(self.playit_path)
+                
+            logging.info("UI force update completed")
+            
+        except Exception as e:
+            logging.error(f"Error in force UI update: {e}")
     
     def on_closing(self):
         """Handle window closing"""
@@ -743,7 +1053,7 @@ class MinecraftServerGUI:
             self.cleanup_and_exit()
     
     def cleanup_and_exit(self):
-        """Clean up and exit"""
+        """Clean up and exit - INCLUDING MOD MANAGEMENT"""
         try:
             logging.info("Shutting down...")
             
@@ -760,6 +1070,26 @@ class MinecraftServerGUI:
             self.backup_manager.stop_auto_backup()
             self.sleep_manager.stop_wake_detection()
             self.auto_shutdown_manager.stop_shutdown_monitoring()
+            
+            # Stop MOD MANAGEMENT components
+            if self.mod_management_enabled:
+                try:
+                    if self.moddownloader:
+                        self.moddownloader.shutdown()
+                    
+                    # Save mod management data
+                    if self.modmanager:
+                        self.modmanager.save_database()
+                    if self.modbackupmanager:
+                        self.modbackupmanager.savebackupindex()
+                    if self.modupdatechecker:
+                        self.modupdatechecker.save_update_cache()
+                    if self.modconfigmanager:
+                        self.modconfigmanager.save_config_database()
+                    
+                    logging.info("Mod management components shut down successfully")
+                except Exception as mod_cleanup_error:
+                    logging.error(f"Error shutting down mod management: {mod_cleanup_error}")
             
             # Stop all processes
             self.process_manager.stop_all_processes()
@@ -781,8 +1111,6 @@ class MinecraftServerGUI:
             error_info = self.error_handler.handle_error(e, "gui_main_loop", ErrorSeverity.CRITICAL)
             logging.critical(f"Critical error in main loop: {error_info}")
             raise
-    
-
 
     def _simple_setup_fallback(self):
         """Simple setup fallback when wizard fails"""
@@ -811,6 +1139,11 @@ class MinecraftServerGUI:
                     if 'server_control' in self.tabs:
                         self.tabs['server_control'].server_jar_var.set(filename)
                     
+                    # Update mod management
+                    if self.mod_management_enabled:
+                        server_dir = os.path.dirname(filename)
+                        self.update_server_directory_for_mods(server_dir)
+                    
                     messagebox.showinfo(
                         "✅ Setup Complete",
                         f"Server JAR selected: {os.path.basename(filename)}\n\n"
@@ -834,11 +1167,14 @@ class MinecraftServerGUI:
         except Exception as e:
             logging.error(f"Simple setup fallback error: {e}")
             messagebox.showerror("Setup Error", f"Setup failed: {e}")
-
             
     def check_first_time_setup(self):
         """Check if this is a first-time setup and offer wizard"""
         try:
+            # Check if welcome dialog has already been shown
+            if self.config.get("welcome_dialog_shown", False):
+                return  # Exit early if welcome was already shown
+            
             # Check multiple indicators of first-time setup
             needs_setup = False
             
@@ -870,7 +1206,7 @@ class MinecraftServerGUI:
                 
         except Exception as e:
             logging.error(f"Error checking first-time setup: {e}")
-
+    
     def show_first_time_welcome(self):
         """Show improved first-time welcome with PROPER SIZING"""
         theme = self.theme_manager.get_current_theme()
@@ -937,6 +1273,23 @@ class MinecraftServerGUI:
         )
         welcome_subtitle.pack(pady=(5, 0))
         
+        # MOD MANAGEMENT STATUS - NEW SECTION
+        if self.mod_management_enabled:
+            mod_status_frame = tk.Frame(content_frame, bg=theme['success'], relief='solid', bd=1)
+            mod_status_frame.pack(fill="x", pady=(0, 10))
+            
+            mod_status_content = tk.Frame(mod_status_frame, bg=theme['success'])
+            mod_status_content.pack(padx=10, pady=5)
+            
+            mod_status_label = tk.Label(
+                mod_status_content,
+                text="🔧 Mod Management: ENABLED - Full mod support available!",
+                bg=theme['success'],
+                fg='white',
+                font=('Segoe UI', 9, 'bold')
+            )
+            mod_status_label.pack()
+        
         # Status message
         status_frame = tk.Frame(content_frame, bg=theme['bg_card'], relief='solid', bd=1)
         status_frame.pack(fill="x", pady=(0, 20))
@@ -946,8 +1299,8 @@ class MinecraftServerGUI:
         
         # Check server status (simplified)
         has_server = (hasattr(self, 'server_jar_path') and 
-                    self.server_jar_path and 
-                    os.path.exists(self.server_jar_path))
+                      self.server_jar_path and 
+                      os.path.exists(self.server_jar_path))
         
         if has_server:
             status_msg = "🎯 Server detected! Ready to manage your server."
@@ -985,15 +1338,28 @@ class MinecraftServerGUI:
             action_desc = tk.Label(
                 action_frame,
                 text="Our setup will guide you through creating a new Minecraft server.\n\n"
-                    "What you'll need: A Minecraft server JAR file\n"
-                    "Time needed: About 5 minutes\n\n"
-                    "We'll help you configure settings and generate your world!",
+                     "What you'll need: A Minecraft server JAR file\n"
+                     "Time needed: About 5 minutes\n\n"
+                     "We'll help you configure settings and generate your world!",
                 bg=theme['bg_primary'],
                 fg=theme['text_secondary'],
                 font=('Segoe UI', 9),
                 justify='left'
             )
             action_desc.pack(pady=(0, 15))
+            
+            # Add mod management info if available
+            if self.mod_management_enabled:
+                mod_info = tk.Label(
+                    action_frame,
+                    text="🔧 BONUS: Full mod management is available!\n"
+                         "Install mods, manage dependencies, check for updates, and more!",
+                    bg=theme['bg_primary'],
+                    fg=theme['accent'],
+                    font=('Segoe UI', 9, 'italic'),
+                    justify='left'
+                )
+                mod_info.pack(pady=(5, 0))
             
         else:  # manage existing
             action_title = tk.Label(
@@ -1008,14 +1374,27 @@ class MinecraftServerGUI:
             action_desc = tk.Label(
                 action_frame,
                 text="Your server is ready to use!\n\n"
-                    "You can start your server, configure settings,\n"
-                    "monitor performance, and create backups.",
+                     "You can start your server, configure settings,\n"
+                     "monitor performance, and create backups.",
                 bg=theme['bg_primary'],
                 fg=theme['text_secondary'],
                 font=('Segoe UI', 9),
                 justify='left'
             )
             action_desc.pack(pady=(0, 15))
+            
+            # Add mod management info if available
+            if self.mod_management_enabled:
+                mod_info = tk.Label(
+                    action_frame,
+                    text="🔧 PLUS: Use the Mods tab to install and manage mods!\n"
+                         "Browse online repositories, auto-update, and more!",
+                    bg=theme['bg_primary'],
+                    fg=theme['accent'],
+                    font=('Segoe UI', 9, 'italic'),
+                    justify='left'
+                )
+                mod_info.pack(pady=(5, 0))
         
         # BUTTONS SECTION - Fixed layout
         buttons_frame = tk.Frame(content_frame, bg=theme['bg_primary'])
@@ -1029,283 +1408,321 @@ class MinecraftServerGUI:
                 command=lambda: self.start_setup_from_welcome(welcome),
                 bg=theme['accent'],
                 fg='white',
-                font=('Segoe UI', 12, 'bold'),
-                padx=30,
-                pady=12,
-                relief='flat',
-                cursor='hand2'
+                font=('Segoe UI', 11, 'bold'),
+                padx=20,
+                pady=8,
+                cursor='hand2',
+                relief='flat'
             )
-            setup_btn.pack(pady=5)
+            setup_btn.pack(pady=(0, 10))
             
-            # Manual setup button
-            manual_btn = tk.Button(
+            # Quick Setup button (secondary)
+            quick_btn = tk.Button(
                 buttons_frame,
-                text="📁 Browse for Existing Server",
-                command=lambda: self.start_manual_from_welcome(welcome),
-                bg=theme['bg_tertiary'],
+                text="⚡ Quick Setup (Browse for JAR)",
+                command=lambda: self.quick_setup_from_welcome(welcome),
+                bg=theme['bg_card'],
                 fg=theme['text_primary'],
                 font=('Segoe UI', 10),
-                padx=25,
-                pady=8,
-                relief='flat',
-                cursor='hand2'
+                padx=15,
+                pady=6,
+                cursor='hand2',
+                relief='flat'
             )
-            manual_btn.pack(pady=5)
-            
-        else:  # existing server
-            # Go to server control button
+            quick_btn.pack(pady=(0, 5))
+        
+        else:  # manage existing
+            # Go to Server Control button
             control_btn = tk.Button(
                 buttons_frame,
                 text="🎮 Go to Server Control",
-                command=lambda: self.go_to_server_control(welcome),
-                bg=theme['success'],
+                command=lambda: self.go_to_server_control_from_welcome(welcome),
+                bg=theme['accent'],
                 fg='white',
-                font=('Segoe UI', 12, 'bold'),
-                padx=30,
-                pady=12,
-                relief='flat',
-                cursor='hand2'
+                font=('Segoe UI', 11, 'bold'),
+                padx=20,
+                pady=8,
+                cursor='hand2',
+                relief='flat'
             )
-            control_btn.pack(pady=5)
+            control_btn.pack(pady=(0, 10))
+            
+            # Go to Mods tab button (if available)
+            if self.mod_management_enabled:
+                mods_btn = tk.Button(
+                    buttons_frame,
+                    text="🔧 Manage Mods",
+                    command=lambda: self.go_to_mods_tab_from_welcome(welcome),
+                    bg=theme['success'],
+                    fg='white',
+                    font=('Segoe UI', 10),
+                    padx=15,
+                    pady=6,
+                    cursor='hand2',
+                    relief='flat'
+                )
+                mods_btn.pack(pady=(0, 5))
         
-        # Skip section (at bottom)
-        skip_frame = tk.Frame(content_frame, bg=theme['bg_primary'])
-        skip_frame.pack(fill="x", pady=(20, 10))
-        
+        # Skip button (always available)
         skip_btn = tk.Button(
-            skip_frame,
-            text="Skip for now",
+            buttons_frame,
+            text="Skip and explore on my own",
             command=lambda: self.skip_welcome(welcome),
             bg=theme['bg_primary'],
             fg=theme['text_muted'],
-            font=('Segoe UI', 8),
-            relief='flat',
+            font=('Segoe UI', 9),
+            pady=5,
             cursor='hand2',
+            relief='flat',
             bd=0
         )
-        skip_btn.pack()
+        skip_btn.pack(pady=5)
         
-        # Bind mousewheel to canvas for scrolling
-        def _on_mousewheel(event):
-            main_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        # Feature highlights section
+        features_frame = tk.Frame(content_frame, bg=theme['bg_primary'])
+        features_frame.pack(fill="x", pady=(20, 0))
         
-        welcome.bind("<MouseWheel>", _on_mousewheel)
+        features_title = tk.Label(
+            features_frame,
+            text="✨ What's Included",
+            bg=theme['bg_primary'],
+            fg=theme['text_primary'],
+            font=('Segoe UI', 12, 'bold')
+        )
+        features_title.pack(pady=(0, 10))
         
-        # Prevent closing without action
-        welcome.protocol("WM_DELETE_WINDOW", lambda: self.skip_welcome(welcome))
+        # Features list with better layout
+        features_list = [
+            "🎮 Easy server control (start, stop, restart)",
+            "💻 Live console with command input",
+            "💾 Automatic and manual backups",
+            "❤️ Server health monitoring",
+            "⚙️ Server properties management",
+            "🎨 Multiple themes (dark, light, blue)"
+        ]
         
-        # Force update to ensure everything is visible
-        welcome.update_idletasks()
-        main_canvas.update_idletasks()
-
-
-    def start_setup_from_welcome(self, welcome_dialog):
-        """Start setup wizard from improved welcome - WITH ERROR HANDLING"""
+        # Add mod management features if available
+        if self.mod_management_enabled:
+            features_list.extend([
+                "🔧 Complete mod management system",
+                "📦 Install mods from online repositories", 
+                "🔄 Automatic mod updates",
+                "🔗 Smart dependency resolution",
+                "⚙️ Mod configuration editing"
+            ])
+        
+        for feature in features_list:
+            feature_label = tk.Label(
+                features_frame,
+                text=feature,
+                bg=theme['bg_primary'],
+                fg=theme['text_secondary'],
+                font=('Segoe UI', 9),
+                anchor='w'
+            )
+            feature_label.pack(anchor='w', pady=1)
+        
+        # Bind mouse wheel scrolling
+        def bind_mousewheel(widget):
+            widget.bind("<MouseWheel>", lambda e: main_canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
+            for child in widget.winfo_children():
+                bind_mousewheel(child)
+        
+        bind_mousewheel(scrollable_frame)
+        
+        # Set focus to window
+        welcome.focus_set()
+        
+        # Mark welcome as shown
+        self.config.set("welcome_dialog_shown", True)
+        self.config.save_config()
+    
+    def start_setup_from_welcome(self, welcome_window):
+        """Start setup wizard from welcome dialog"""
         try:
-            logging.info("Starting setup wizard from welcome dialog")
-            welcome_dialog.destroy()
-            
-            # Small delay to ensure dialog closes properly
-            self.root.after(100, self._show_setup_wizard_delayed)
-            
+            welcome_window.destroy()
+            self._simple_setup_fallback()  # Use simple setup for now
         except Exception as e:
             logging.error(f"Error starting setup from welcome: {e}")
-            welcome_dialog.destroy()
-            messagebox.showerror("Error", f"Could not start setup wizard: {e}")
-
-    def _show_setup_wizard_delayed(self):
-        """Show setup wizard with delay - prevents timing issues"""
+    
+    def quick_setup_from_welcome(self, welcome_window):
+        """Quick setup from welcome dialog"""
         try:
-            self.show_setup_wizard()
+            welcome_window.destroy()
+            self.browse_server_jar()
+            if self.server_jar_path:
+                self.config.set("setup_wizard_completed", True)
+                self.config.save_config()
+                messagebox.showinfo(
+                    "Setup Complete",
+                    "Quick setup completed! Your server is ready to start."
+                )
         except Exception as e:
-            logging.error(f"Error showing setup wizard: {e}")
-            messagebox.showerror("Setup Wizard Error", f"Failed to open setup wizard: {e}")
-            # Fallback - go to server control tab
-            self._fallback_to_server_control()
-
-    def show_setup_wizard(self):
-        """Show the server setup wizard with improved debugging"""
+            logging.error(f"Error in quick setup: {e}")
+    
+    def go_to_server_control_from_welcome(self, welcome_window):
+        """Go to server control tab from welcome"""
         try:
-            # Debug first
-            print("Attempting to import setup wizard...")
-            
-            # Try the import
-            from .dialogs.setup_wizard import ServerSetupWizard
-            
-            print("Import successful, creating wizard...")
-            
-            # Store wizard reference in case we need to access it later
-            self.current_wizard = ServerSetupWizard(self.root, self.theme_manager, self)
-            print("Setup wizard created successfully")
-            
-        except ImportError as ie:
-            print(f"Import error: {ie}")
-            logging.error(f"Setup wizard import error: {ie}")
-            
-            # Show detailed error to user
-            error_msg = (
-                f"Setup wizard import failed: {ie}\n\n"
-                f"This usually means:\n"
-                f"• Missing gui/dialogs/__init__.py file\n"
-                f"• setup_wizard.py has syntax errors\n"
-                f"• Wrong folder structure\n\n"
-                f"Would you like to use simple setup instead?"
-            )
-            
-            result = messagebox.askyesno("Import Error", error_msg)
-            if result:
-                self._simple_setup_fallback()
-                
-        except Exception as e:
-            print(f"Other error: {e}")
-            logging.error(f"Setup wizard error: {e}")
-            messagebox.showerror("Setup Wizard Error", f"Failed to open setup wizard: {e}")
-            self._simple_setup_fallback()
-
-    def _fallback_to_server_control(self):
-        """Fallback method to go to server control tab"""
-        try:
-            # Switch to server control tab
+            welcome_window.destroy()
+            # Find and select server control tab
             for i in range(self.notebook.index("end")):
-                tab_text = self.notebook.tab(i, "text")
-                if "Server Control" in tab_text or "🎮" in tab_text:
+                if "Control" in self.notebook.tab(i, "text"):
                     self.notebook.select(i)
                     break
-            
-            self.footer.update_status("Setup wizard not available - use manual setup in Server Control tab")
-            
-            # Show helpful instructions
-            messagebox.showinfo(
-                "Manual Setup Instructions",
-                "📋 To set up your server manually:\n\n"
-                "1. Click 'Browse' next to 'Server JAR'\n"
-                "2. Select your Minecraft server JAR file\n"
-                "3. Configure any settings you want\n"
-                "4. Click 'Start Server'\n\n"
-                "The server will create worlds automatically on first run!"
-            )
-            
-        except Exception as e:
-            logging.error(f"Fallback error: {e}")
-            self.footer.update_status("Please use the Server Control tab to set up your server")
-
-    def start_manual_from_welcome(self, welcome_dialog):
-        """Start manual setup from welcome - FIXED VERSION"""
-        try:
-            logging.info("Starting manual setup from welcome")
-            welcome_dialog.destroy()
-            
-            # Go to server control tab
-            self._fallback_to_server_control()
-            
-        except Exception as e:
-            logging.error(f"Error starting manual setup: {e}")
-            try:
-                welcome_dialog.destroy()
-            except:
-                pass
-            messagebox.showerror("Error", f"Could not start manual setup: {e}")
-
-    def go_to_server_control(self, welcome_dialog):
-        """Go directly to server control for ready servers - FIXED VERSION"""
-        try:
-            logging.info("Going to server control from welcome")
-            welcome_dialog.destroy()
-            
-            # Switch to server control tab
-            for i in range(self.notebook.index("end")):
-                tab_text = self.notebook.tab(i, "text")
-                if "Server Control" in tab_text or "🎮" in tab_text:
-                    self.notebook.select(i)
-                    break
-            
-            self.footer.update_status("Your server is ready! Click 'Start Server' to begin.")
-            
         except Exception as e:
             logging.error(f"Error going to server control: {e}")
-            try:
-                welcome_dialog.destroy()
-            except:
-                pass
-            messagebox.showerror("Error", f"Could not open server control: {e}")
-
-    def skip_welcome(self, welcome_dialog):
-        """Skip welcome with confirmation - FIXED VERSION"""
+    
+    def go_to_mods_tab_from_welcome(self, welcome_window):
+        """Go to mods tab from welcome"""
         try:
-            # Ask for confirmation
-            response = messagebox.askyesno(
-                "Skip Setup", 
-                "Are you sure you want to skip the welcome setup?\n\n"
-                "You can always access setup options from the Server Control tab."
-            )
-            
-            if response:
-                logging.info("User skipped welcome setup")
-                welcome_dialog.destroy()
-                self.footer.update_status("Welcome skipped - access setup from Server Control tab when ready")
-            # If they say no, just stay on the welcome dialog
-            
+            welcome_window.destroy()
+            # Find and select mods tab
+            for i in range(self.notebook.index("end")):
+                if "Mods" in self.notebook.tab(i, "text"):
+                    self.notebook.select(i)
+                    break
+        except Exception as e:
+            logging.error(f"Error going to mods tab: {e}")
+    
+    def skip_welcome(self, welcome_window):
+        """Skip welcome dialog"""
+        try:
+            welcome_window.destroy()
+            self.config.set("setup_wizard_completed", True)
+            self.config.save_config()
         except Exception as e:
             logging.error(f"Error skipping welcome: {e}")
-            # Force close the dialog anyway
-            try:
-                welcome_dialog.destroy()
-            except:
-                pass
-            self.footer.update_status("Welcome closed - use Server Control tab for setup")
             
-    def debug_setup_wizard(self):
-        """Debug setup wizard import issues"""
-        import os
-        import sys
-        
-        print("=== SETUP WIZARD DEBUG ===")
-        
-        # Check current directory
-        current_dir = os.path.dirname(__file__)
-        print(f"Current directory: {current_dir}")
-        
-        # Check for dialogs folder
-        dialogs_dir = os.path.join(current_dir, 'dialogs')
-        print(f"Dialogs folder exists: {os.path.exists(dialogs_dir)}")
-        
-        if os.path.exists(dialogs_dir):
-            print(f"Files in dialogs: {os.listdir(dialogs_dir)}")
-            
-            # Check for specific files
-            init_file = os.path.join(dialogs_dir, '__init__.py')
-            wizard_file = os.path.join(dialogs_dir, 'setup_wizard.py')
-            
-            print(f"__init__.py exists: {os.path.exists(init_file)}")
-            print(f"setup_wizard.py exists: {os.path.exists(wizard_file)}")
-            
-            # Check file contents briefly
-            if os.path.exists(wizard_file):
-                try:
-                    with open(wizard_file, 'r') as f:
-                        first_lines = f.readlines()[:5]
-                    print("First few lines of setup_wizard.py:")
-                    for line in first_lines:
-                        print(f"  {line.strip()}")
-                except Exception as e:
-                    print(f"Error reading setup_wizard.py: {e}")
-        
-        # Try the import and see what happens
-        print("\nTrying import...")
+    def auto_load_server_properties(self):
+        """Automatically load server properties after JAR selection"""
         try:
-            from .dialogs.setup_wizard import ServerSetupWizard
-            print("✅ Import successful!")
-            return True
-        except ImportError as e:
-            print(f"❌ Import error: {e}")
-            return False
+            # Check if properties tab exists and is initialized
+            if 'properties' in self.tabs:
+                properties_tab = self.tabs['properties']
+                
+                # Give the UI a moment to update, then load properties
+                self.root.after(500, self._delayed_properties_load)
+                
+            else:
+                logging.warning("Properties tab not available for auto-loading")
+                
         except Exception as e:
-            print(f"❌ Other error: {e}")
-            return False
+            logging.error(f"Error in auto-load server properties: {e}")
 
-    # Call this method to debug
-    # self.debug_setup_wizard()
+    def _delayed_properties_load(self):
+        """Delayed properties loading to ensure UI is ready"""
+        try:
+            if 'properties' in self.tabs:
+                properties_tab = self.tabs['properties']
+                
+                # Check if the tab has the load_properties method
+                if hasattr(properties_tab, 'load_properties'):
+                    
+                    # Call the load_properties method
+                    properties_tab.load_properties()
+                    
+                    # Update footer with success message
+                    if hasattr(self, 'footer') and self.footer:
+                        self.footer.update_status("✅ Server properties loaded automatically")
+                    
+                    logging.info("✅ Server properties auto-loaded successfully")
+                    
+                else:
+                    logging.warning("Properties tab doesn't have load_properties method")
+                    
+        except Exception as e:
+            # Don't show error dialogs for auto-loading - just log
+            logging.warning(f"Could not auto-load server properties: {e}")
+            
+            if hasattr(self, 'footer') and self.footer:
+                self.footer.update_status("⚠️ Could not auto-load properties - load manually if needed")
+    
+    def debug_jar_persistence(self):
+        """Debug JAR file persistence issues"""
+        print("🔍 JAR PERSISTENCE DEBUG")
+        
+        try:
+            # Check current state
+            print(f"Current server_jar_path: {getattr(self, 'server_jar_path', 'NOT SET')}")
+            
+            # Check config value
+            config_jar = self.config.get("last_server_jar", "")
+            print(f"Config last_server_jar: '{config_jar}'")
+            
+            # Check if config file exists
+            config_file = self.config.config_file
+            print(f"Config file: {config_file}")
+            print(f"Config file exists: {os.path.exists(config_file)}")
+            
+            # Check file validation
+            if config_jar:
+                print(f"Config JAR file exists: {os.path.exists(config_jar)}")
+                try:
+                    validated_path = self.config.validate_file_path(config_jar)
+                    print(f"Validated path: '{validated_path}'")
+                except Exception as validation_error:
+                    print(f"Validation error: {validation_error}")
+            
+            # Check setup wizard status
+            setup_completed = self.config.get("setup_wizard_completed", False)
+            welcome_shown = self.config.get("welcome_dialog_shown", False)
+            print(f"Setup wizard completed: {setup_completed}")
+            print(f"Welcome dialog shown: {welcome_shown}")
+            
+        except Exception as e:
+            print(f"Debug error: {e}")
+    
+    def notify_dashboard_change(self):
+        """Notify dashboard of state changes"""
+        try:
+            if hasattr(self, 'tabs') and 'dashboard' in self.tabs:
+                dashboard_tab = self.tabs['dashboard']
+                if hasattr(dashboard_tab, 'refresh_from_external_change'):
+                    # Schedule refresh on main thread
+                    self.root.after(100, dashboard_tab.refresh_from_external_change)
+                    print("🔄 Notified dashboard of state change")
+        except Exception as e:
+            print(f"❌ Error notifying dashboard: {e}")
 
+def run_gui():
+    """Run the enhanced Minecraft Server Manager GUI with mod management"""
+    try:
+        # Set up logging for GUI
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler('minecraft_server_manager.log'),
+                logging.StreamHandler()
+            ]
+        )
+        
+        logging.info("Starting Enhanced Minecraft Server Manager with Mod Management...")
+        
+        # Create and run GUI
+        app = MinecraftServerGUI()
+        app.run()
+        
+    except Exception as e:
+        logging.critical(f"Critical error starting GUI: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # Show error dialog if possible
+        try:
+            import tkinter.messagebox as msgbox
+            msgbox.showerror(
+                "Critical Error", 
+                f"Failed to start Minecraft Server Manager:\n\n{str(e)}\n\nCheck the log file for details."
+            )
+        except:
+            print(f"CRITICAL ERROR: {e}")
+            
+
+
+
+
+        
 
 
 

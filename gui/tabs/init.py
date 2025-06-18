@@ -9,8 +9,9 @@ from .backup_tab import BackupTab
 from .health_tab import HealthTab
 from .settings_tab import SettingsTab
 from .server_properties_tab import ServerPropertiesTab
+from .mods_tab import ModsTab
 
 __all__ = [
     'DashboardTab', 'ServerControlTab', 'ConsoleTab', 
-    'BackupTab', 'HealthTab', 'SettingsTab', 'ServerPropertiesTab'
+    'BackupTab', 'HealthTab', 'SettingsTab', 'ServerPropertiesTab', 'ModsTab'
 ]

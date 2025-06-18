@@ -264,8 +264,8 @@ class DashboardTab(BaseTab):
         self.register_widget(self.memory_progress)
         self.register_widget(self.cpu_progress)
         
-        # Initial update
-        self.update_dashboard_data()
+        # DELAYED INITIAL UPDATE - wait for main window to fully initialize
+        self.main_window.root.after(1000, self.force_dashboard_refresh)
     
     def setup_status_text_colors(self):
         """Setup color tags for status text"""
@@ -288,7 +288,7 @@ class DashboardTab(BaseTab):
                 try:
                     if hasattr(self, 'main_window') and self.main_window.root:
                         self.main_window.root.after(0, self.update_dashboard_data)
-                    time.sleep(2)  # Update every 2 seconds
+                    time.sleep(3)  # Update every 2 seconds
                 except:
                     break
         
@@ -296,22 +296,33 @@ class DashboardTab(BaseTab):
         update_thread.start()
     
     def update_dashboard_data(self):
-        """Update all dashboard data with real information"""
+        """Update all dashboard data with throttling and error handling"""
+        import time
+        import logging
+
+        # Throttle updates - don't update more than once per second
+        if hasattr(self, '_last_gui_update'):
+            if time.time() - self._last_gui_update < 1.0:
+                return  # Skip this update
+
+        self._last_gui_update = time.time()
+
         try:
             # Update server status text with colors
             self.update_colored_server_status()
-            
+
             # Update performance metrics with values in bars
             self.update_enhanced_performance_metrics()
-            
+
             # Update server information
             self.update_server_info()
-            
+
             # Update button states
             self.update_button_states()
-            
+
         except Exception as e:
-            print(f"Error updating dashboard: {e}")
+            logging.error(f"Error updating dashboard: {e}")
+
     
     def update_colored_server_status(self):
         """Update server status with colored text"""
@@ -546,3 +557,35 @@ class DashboardTab(BaseTab):
     def cleanup(self):
         """Cleanup dashboard resources"""
         self.update_active = False
+        
+    def force_dashboard_refresh(self):
+        """Force immediate dashboard refresh"""
+        try:
+            print("🔄 Force refreshing dashboard state...")
+            
+            # Debug current state
+            jar_path = getattr(self.main_window, 'server_jar_path', None)
+            print(f"🔍 JAR path: {jar_path}")
+            
+            is_running = False
+            if hasattr(self.main_window, 'process_manager'):
+                is_running = self.main_window.process_manager.is_server_running()
+                print(f"🔍 Server running: {is_running}")
+            
+            # Force update all dashboard data
+            self.update_dashboard_data()
+            
+            print("✅ Dashboard force refresh completed")
+            
+        except Exception as e:
+            print(f"❌ Error in force dashboard refresh: {e}")
+
+    def refresh_from_external_change(self):
+        """Called when external changes happen (JAR selected, server started, etc.)"""
+        try:
+            # Immediate update
+            self.update_dashboard_data()
+            print("🔄 Dashboard updated from external change")
+        except Exception as e:
+            print(f"❌ Error refreshing from external change: {e}")
+
